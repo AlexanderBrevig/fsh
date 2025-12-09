@@ -1,0 +1,4 @@
+(executable
+ (public_name fsh)
+ (name main)
+ (libraries fsh))
