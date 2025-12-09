@@ -13,7 +13,7 @@ cat /etc/legal | grep "free"
 fsh uses a stack (Reverse Polish Notation):
 
 ```forth
-/etc/legal cat free grep \→ automatically prints and pipes!
+/etc/legal cat free grep \ → automatically prints and pipes!
 ```
 
 Commands automatically:
@@ -46,8 +46,8 @@ alias fsh='/path/to/fsh/_build/default/bin/main.exe'
 Push arguments, then run commands:
 
 ```forth
-/etc/legal cat \→ cat /etc/legal (prints result)
-"hello" lib 1  \→ ls lib (prints directory listing) hello still on stack
+/etc/legal cat \ → cat /etc/legal (prints result)
+"hello" lib 1  \ → ls lib (prints directory listing) hello still on stack
 ```
 
 ### Automatic Piping
@@ -55,8 +55,8 @@ Push arguments, then run commands:
 Command outputs automatically pipe to the next command:
 
 ```forth
-/etc/legal cat free grep  \→ cat /etc/legal | grep free
-lib 1 ls eval 1 grep      \→ ls lib | grep eval
+/etc/legal cat free grep  \ → cat /etc/legal | grep free
+lib 1 ls eval 1 grep      \ → ls lib | grep eval
 ```
 
 ### Stack-Aware Prompt
@@ -73,20 +73,20 @@ fsh[1:1]>     ← 1 argument + 1 output (mixed)
 ### Stack Manipulation
 
 ```forth
-dup   \→ duplicate top item
-swap  \→ swap top two items
-drop  \→ remove top item
-clear \→ clear entire stack
-.s    \→ show entire stack
-.     \→ print and remove top (with newline)
-type  \→ print and remove top (no newline)
+dup   \ → duplicate top item
+swap  \ → swap top two items
+drop  \ → remove top item
+clear \ → clear entire stack
+.s    \ → show entire stack
+.     \ → print and remove top (with newline)
+type  \ → print and remove top (no newline)
 ```
 
 ### Custom Words
 
 ```forth
-: lsgrep 1 ls 1 grep \→ define reusable command
-eval lib lsgrep      \→ use it: ls lib | grep eval
+: lsgrep 1 ls 1 grep \ → define reusable command
+eval lib lsgrep      \ → use it: ls lib | grep eval
 ```
 
 ### Control Flow
@@ -96,51 +96,51 @@ eval lib lsgrep      \→ use it: ls lib | grep eval
 5 3 > if greater . else smaller . then
 
 \ Loops
-0 5 do i . loop           \→ print 0 through 4
-5 begin dup . 1 - dup 0 = until drop \→ countdown
+0 5 do i . loop           \ → print 0 through 4
+5 begin dup . 1 - dup 0 = until drop \ → countdown
 
 \ Process each line
-lib 1 ls each cat then    \→ cat each file in lib/
+lib 1 ls each cat then    \ → cat each file in lib/
 ```
 
 ### String Operations
 
 ```forth
-"hello " "world" concat .     \→ hello world
-*.ml .s                       \→ glob expansion (shows all .ml files)
+"hello " "world" concat .     \ → hello world
+*.ml .s                       \ → glob expansion (shows all .ml files)
 
 \ Conditional concatenation (great for prompts!)
-"main" "@" ?prefix .          \→ @main
-"" "@" ?prefix .              \→ (empty - no separator added)
-"user" ":" ?suffix .          \→ user:
-"branch" "[" "]" ?wrap .      \→ [branch]
+"main" "@" ?prefix .          \ → @main
+"" "@" ?prefix .              \ → (empty - no separator added)
+"user" ":" ?suffix .          \ → user:
+"branch" "[" "]" ?wrap .      \ → [branch]
 ```
 
 ### Environment & Files
 
 ```forth
-HOME getenv .             \→ get env variable
-MY_VAR hello setenv       \→ set env variable
-/tmp cd                   \→ change directory
-test.txt pwd >file        \→ redirect output to file
-?                         \→ get exit code of last command
+HOME getenv .             \ → get env variable
+MY_VAR hello setenv       \ → set env variable
+/tmp cd                   \ → change directory
+test.txt pwd >file        \ → redirect output to file
+?                         \ → get exit code of last command
 ```
 
 ### Math & Comparison
 
 ```forth
-5 3 + .                   \→ 8
-10 3 /mod                 \→ quotient and remainder
-5 3 > .                   \→ 1 (true)
+5 3 + .                   \ → 8
+10 3 /mod                 \ → quotient and remainder
+5 3 > .                   \ → 1 (true)
 ```
 
 ### Help
 
 ```forth
-words                     \→ list all words
-help                      \→ show help
-see dup                   \→ show definition of a word
-see ls                    \→ show help for external command (--help or man)
+words                     \ → list all words
+help                      \ → show help
+see dup                   \ → show definition of a word
+see ls                    \ → show help for external command (--help or man)
 ```
 
 ### Customizable Prompt
@@ -194,17 +194,17 @@ Define your own prompt with `$prompt` and helper words:
 Control how many arguments a command consumes:
 
 ```forth
-foo bar baz echo      \→ echo foo bar baz (all args)
-foo bar 1 echo        \→ echo bar (only 1 arg, "foo" stays on stack)
+foo bar baz echo      \ → echo foo bar baz (all args)
+foo bar 1 echo        \ → echo bar (only 1 arg, "foo" stays on stack)
 ```
 
 ### Quoted vs Unquoted Strings
 
 ```forth
-hello                     \→ tries PATH lookup, executes if found, else pushes "hello"
-"hello"                   \→ always pushes literal string
-*.ml                      \→ glob expands to matching files
-"*.ml"                    \→ literal string "*.ml"
+hello                     \ → tries PATH lookup, executes if found, else pushes "hello"
+"hello"                   \ → always pushes literal string
+*.ml                      \ → glob expands to matching files
+"*.ml"                    \ → literal string "*.ml"
 ```
 
 ### Output vs String Types
@@ -214,15 +214,15 @@ hello                     \→ tries PATH lookup, executes if found, else pushes
 
 ```forth
 \ .s to see the difference:
-hello     \→ String "hello"
-pwd cat   \→ Output «/home/...»
+hello     \ → String "hello"
+pwd cat   \ → Output «/home/...»
 ```
 
 Convert between types:
 
 ```forth
-hello >output cat         \→ treat string as pipeable output
-pwd cat >string echo      \→ treat output as string argument
+hello >output cat         \ → treat string as pipeable output
+pwd cat >string echo      \ → treat output as string argument
 ```
 
 ## Examples
@@ -257,7 +257,7 @@ lib 1 ls each "lib/" swap concat cat then
 ```forth
 \ Factorial
 : factorial 1 swap 1 + 1 do i * loop ;
-5 factorial \→ 120
+5 factorial \ → 120
 
 \ FizzBuzz
 : fizzbuzz

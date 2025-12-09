@@ -1,5 +1,8 @@
 open Core
 
+(* Exception for early exit from word definitions *)
+exception Word_exit
+
 (* Core value types on the stack *)
 type value =
   | String of string
@@ -54,6 +57,7 @@ and state =
   ; mutable collecting_loop : (loop_type * string list * int) option  (* Collecting loop body with nesting depth *)
   ; mutable collecting_each : (string * (string * bool) list) option  (* (output_content, body_with_quotes) for each...then *)
   ; mutable custom_prompt : string option  (* Cached custom prompt from $prompt evaluation *)
+  ; mutable prompt_eval_original_stack : stack option  (* Original stack during prompt evaluation for $stack/$in/$out *)
   }
 
 let create_state () =
@@ -68,5 +72,6 @@ let create_state () =
   ; collecting_loop = None
   ; collecting_each = None
   ; custom_prompt = None
+  ; prompt_eval_original_stack = None
   }
 ;;

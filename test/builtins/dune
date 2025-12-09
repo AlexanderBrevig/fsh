@@ -1,0 +1,27 @@
+(library
+ (name test_stack)
+ (modules test_stack)
+ (libraries fsh core lwt lwt.unix expect_test_helpers_core)
+ (inline_tests)
+ (preprocess (pps ppx_jane ppx_expect ppx_inline_test)))
+
+(library
+ (name test_io)
+ (modules test_io)
+ (libraries fsh core lwt lwt.unix expect_test_helpers_core)
+ (inline_tests)
+ (preprocess (pps ppx_jane ppx_expect ppx_inline_test)))
+
+(library
+ (name test_system)
+ (modules test_system)
+ (libraries fsh core lwt lwt.unix expect_test_helpers_core)
+ (inline_tests)
+ (preprocess (pps ppx_jane ppx_expect ppx_inline_test)))
+
+(library
+ (name test_computation)
+ (modules test_computation)
+ (libraries fsh core lwt lwt.unix expect_test_helpers_core)
+ (inline_tests)
+ (preprocess (pps ppx_jane ppx_expect ppx_inline_test)))

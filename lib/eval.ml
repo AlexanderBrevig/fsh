@@ -169,8 +169,8 @@ and eval_token state (token, is_quoted) : unit Lwt.t =
                  (* Condition true, exit loop *)
                  state.stack <- rest;
                  return ()
-             | [] -> failwith "until: stack underflow (needs condition)"
-             | _ :: _ -> failwith "until: requires integer condition"
+             | [] -> Lwt.fail (Failure "until: stack underflow (needs condition)")
+             | _ :: _ -> Lwt.fail (Failure "until: requires integer condition")
            in
            loop_until ()
        | "until", Types.BeginUntil, _ ->
@@ -210,8 +210,8 @@ and eval_token state (token, is_quoted) : unit Lwt.t =
                  state.stack <- rest;
                  execute_tokens state after_while >>= fun () ->
                  loop_while ()
-             | [] -> failwith "while: stack underflow (needs condition)"
-             | _ :: _ -> failwith "while: requires integer condition"
+             | [] -> Lwt.fail (Failure "while: stack underflow (needs condition)")
+             | _ :: _ -> Lwt.fail (Failure "while: requires integer condition")
            in
            loop_while ()
        | "repeat", Types.BeginWhile, _ ->
@@ -257,34 +257,7 @@ and eval_token state (token, is_quoted) : unit Lwt.t =
            (match state.stack with
             | Int limit :: Int start :: rest ->
                 state.stack <- rest;
-                (* Execute loop with dynamic step *)
-                let rec loop_do_step idx =
-                  (* Check if we should continue (ascending or descending) *)
-                  let should_continue =
-                    if start < limit then idx < limit
-                    else idx > limit
-                  in
-                  if should_continue then (
-                    (* Push loop info onto loop stack *)
-                    let loop_info = { Types.start_tokens = loop_body
-                                    ; loop_type = Types.DoPlusLoop
-                                    ; do_start = Some start
-                                    ; do_limit = Some limit
-                                    ; do_index = Some idx
-                                    } in
-                    state.loop_stack <- loop_info :: state.loop_stack;
-                    execute_tokens state loop_body >>= fun () ->
-                    state.loop_stack <- List.tl_exn state.loop_stack;
-                    (* Get step from stack *)
-                    match state.stack with
-                    | Int step :: rest ->
-                        state.stack <- rest;
-                        loop_do_step (idx + step)
-                    | _ -> failwith "+loop: stack underflow (needs step)")
-                  else
-                    return ()
-                in
-                loop_do_step start
+                execute_plus_loop state ~start ~limit ~loop_body
             | _ -> failwith "do: stack underflow (needs start and limit)")
        | "+loop", Types.DoPlusLoop, _ ->
            (* Nested +loop, add to body and decrement depth *)
@@ -298,34 +271,7 @@ and eval_token state (token, is_quoted) : unit Lwt.t =
            (match state.stack with
             | Int limit :: Int start :: rest ->
                 state.stack <- rest;
-                (* Execute loop with dynamic step *)
-                let rec loop_do_step idx =
-                  (* Check if we should continue (ascending or descending) *)
-                  let should_continue =
-                    if start < limit then idx < limit
-                    else idx > limit
-                  in
-                  if should_continue then (
-                    (* Push loop info onto loop stack *)
-                    let loop_info = { Types.start_tokens = loop_body
-                                    ; loop_type = Types.DoPlusLoop
-                                    ; do_start = Some start
-                                    ; do_limit = Some limit
-                                    ; do_index = Some idx
-                                    } in
-                    state.loop_stack <- loop_info :: state.loop_stack;
-                    execute_tokens state loop_body >>= fun () ->
-                    state.loop_stack <- List.tl_exn state.loop_stack;
-                    (* Get step from stack *)
-                    match state.stack with
-                    | Int step :: rest ->
-                        state.stack <- rest;
-                        loop_do_step (idx + step)
-                    | _ -> failwith "+loop: stack underflow (needs step)")
-                  else
-                    return ()
-                in
-                loop_do_step start
+                execute_plus_loop state ~start ~limit ~loop_body
             | _ -> failwith "do: stack underflow (needs start and limit)")
        | "+loop", Types.DoLoop, _ ->
            (* Nested +loop in BeginUntil or other context, add to body and decrement depth *)
@@ -472,7 +418,12 @@ and eval_token state (token, is_quoted) : unit Lwt.t =
              return ()
          | Some (Defined tokens) ->
              (* Execute defined words - treat as unquoted *)
-             Lwt_list.iter_s (fun t -> eval_token state (t, false)) tokens
+             (* Catch Word_exit for early return from word definitions *)
+             Lwt.catch
+               (fun () -> Lwt_list.iter_s (fun t -> eval_token state (t, false)) tokens)
+               (function
+                 | Types.Word_exit -> return ()  (* Early exit, continue normally *)
+                 | exn -> Lwt.fail exn)  (* Re-raise other exceptions *)
          | Some (ShellCmd cmd) ->
              (* Push command as string and exec *)
              state.stack <- String cmd :: state.stack;
@@ -497,10 +448,50 @@ and eval_token state (token, is_quoted) : unit Lwt.t =
                  (* Expand globs if contains glob chars *)
                  if has_glob_chars token then (
                    let matches = expand_glob token in
-                   (* Push matches in order (they'll be reversed on stack) *)
-                   List.iter matches ~f:(fun m -> state.stack <- String m :: state.stack));
-                 state.stack <- String token :: state.stack;
-                 return ())))
+                   if not (List.is_empty matches) then
+                     (* Push matches in order (they'll be reversed on stack) *)
+                     List.iter matches ~f:(fun m -> state.stack <- String m :: state.stack);
+                   (* If no matches, push nothing *)
+                   return ())
+                 else (
+                   (* Not a glob pattern, push as literal *)
+                   state.stack <- String token :: state.stack;
+                   return ()))))
+
+(* ========== Loop Execution Helpers ========== *)
+
+(* Execute a do...+loop with dynamic step increment
+   Eliminates code duplication between the two +loop cases *)
+and execute_plus_loop state ~start ~limit ~loop_body =
+  let rec loop_do_step idx =
+    (* Check if we should continue (ascending or descending) *)
+    let should_continue =
+      if start < limit then idx < limit
+      else idx > limit
+    in
+    if should_continue then (
+      (* Push loop info onto loop stack *)
+      let loop_info = { Types.start_tokens = loop_body
+                      ; loop_type = Types.DoPlusLoop
+                      ; do_start = Some start
+                      ; do_limit = Some limit
+                      ; do_index = Some idx
+                      } in
+      state.loop_stack <- loop_info :: state.loop_stack;
+      execute_tokens state loop_body >>= fun () ->
+      state.loop_stack <- (match state.loop_stack with
+        | [] -> Errors.internal_error "loop stack underflow in +loop"
+        | _ :: rest -> rest);
+      (* Get step from stack *)
+      match state.stack with
+      | Int step :: rest ->
+          state.stack <- rest;
+          loop_do_step (idx + step)
+      | _ -> Lwt.fail (Failure "+loop: stack underflow (needs step)"))
+    else
+      return ()
+  in
+  loop_do_step start
 ;;
 
 (* Evaluate a line of input *)

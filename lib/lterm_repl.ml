@@ -28,8 +28,11 @@ let update_custom_prompt state =
       state.custom_prompt <- None;
       return ()
   | Some word ->
-      (* Save original stack *)
+      (* Save original stack for prompt helpers to see *)
       let original_stack = state.stack in
+      state.prompt_eval_original_stack <- Some original_stack;
+
+      (* Clear working stack so prompt builds from scratch *)
       state.stack <- [];
 
       (* Try to evaluate $prompt *)
@@ -51,18 +54,19 @@ let update_custom_prompt state =
                return ())
           >>= fun () ->
 
-          (* Collect all values from stack and concatenate *)
-          (* The final result should ideally be a single String after all concats *)
+          (* Collect all values pushed during prompt evaluation *)
           let parts = List.rev_map state.stack ~f:value_to_string in
           let prompt_str = String.concat parts in
 
           (* Store in state and restore original stack *)
           state.custom_prompt <- Some prompt_str;
           state.stack <- original_stack;
+          state.prompt_eval_original_stack <- None;
           return ())
         (fun _exn ->
           (* On error, restore stack and clear custom prompt *)
           state.stack <- original_stack;
+          state.prompt_eval_original_stack <- None;
           state.custom_prompt <- None;
           return ())
 ;;
@@ -92,10 +96,7 @@ let create_continuation_prompt _state =
 ;;
 
 (* History file path *)
-let history_file =
-  match Sys.getenv "HOME" with
-  | Some home -> home ^ "/.fsh_history"
-  | None -> ".fsh_history"
+let history_file = Config.Paths.history ()
 ;;
 
 (* Check if a string is an integer *)
@@ -107,9 +108,8 @@ let is_int s =
   | _ -> false
 ;;
 
-(* Control flow keywords *)
-let control_flow_keywords =
-  ["if"; "then"; "else"; "begin"; "until"; "while"; "repeat"; "do"; "loop"; "+loop"; ":"; ";"]
+(* Control flow keywords (imported from Keywords module) *)
+let control_flow_keywords = Keywords.control_flow
 ;;
 
 (* Tokenize a string for syntax highlighting with position tracking *)
@@ -332,7 +332,13 @@ let read_input term state =
         else
           return (Some combined))
       (function
-      | LTerm_read_line.Interrupt -> return None  (* EOF or Ctrl-C *)
+      | LTerm_read_line.Interrupt ->
+          (* EOF (Ctrl-D) - exit *)
+          return None
+      | Stdlib.Sys.Break ->
+          (* Ctrl-C pressed - clear line and start fresh *)
+          LTerm.fprintl term "" >>= fun () ->
+          read_lines "" true
       | exn -> Lwt.fail exn)
   in
   read_lines "" true
@@ -372,11 +378,7 @@ let auto_type_output state =
 (* Load and execute ~/.fshrc if it exists *)
 let load_config_file state =
   let open Lwt.Infix in
-  let config_path =
-    match Sys.getenv "HOME" with
-    | Some home -> home ^ "/.fshrc"
-    | None -> ".fshrc"
-  in
+  let config_path = Config.Paths.rc () in
   Lwt.catch
     (fun () ->
       (* Check if file exists *)
@@ -398,7 +400,7 @@ let load_config_file state =
                     (fun () -> Eval.eval_line state line)
                     (fun exn ->
                       (* Print error but continue *)
-                      Lwt_io.printf "Warning in ~/.fshrc: %s\n" (Exn.to_string exn))
+                      Lwt_io.printf "Warning in %s: %s\n" (Config.Paths.rc_basename ()) (Exn.to_string exn))
                   >>= fun () ->
                   loop ()))
               (function
@@ -422,7 +424,7 @@ let run_simple () =
     (* Load config file *)
     load_config_file state >>= fun () ->
 
-    Lwt_io.printl "Forth Shell v0.2 (simple mode)" >>= fun () ->
+    Lwt_io.printlf "%s (simple mode)" Config.version_string >>= fun () ->
     Lwt_io.printl "Type 'exit' to quit, Ctrl-D for EOF" >>= fun () ->
     Lwt_io.printl "" >>= fun () ->
 
@@ -441,14 +443,25 @@ let run_simple () =
                 auto_type_output state >>= fun () ->
                 Lwt_io.printl "" >>= fun () ->
                 Lwt_io.flush Lwt_io.stdout)
-              (fun exn ->
-                Lwt_io.printf "Error: %s\n" (Exn.to_string exn) >>= fun () ->
-                Lwt_io.flush Lwt_io.stdout) >>= fun () ->
+              (function
+                | Stdlib.Sys.Break ->
+                    (* Ctrl-C pressed during evaluation *)
+                    Lwt_io.printf "^C\n" >>= fun () ->
+                    Lwt_io.flush Lwt_io.stdout
+                | Types.Word_exit ->
+                    (* Exit called outside word definition - treat as no-op *)
+                    return ()
+                | exn ->
+                    Lwt_io.printf "Error: %s\n" (Exn.to_string exn) >>= fun () ->
+                    Lwt_io.flush Lwt_io.stdout) >>= fun () ->
             loop ()))
         (function
           | End_of_file ->
               Lwt_io.printl "\nGoodbye!" >>= fun () ->
               return ()
+          | Stdlib.Sys.Break ->
+              Lwt_io.printl "\n^C" >>= fun () ->
+              loop ()
           | exn -> Lwt.fail exn)
     in
     loop ()
@@ -470,44 +483,61 @@ let run_interactive () =
     load_config_file state >>= fun () ->
 
     (* Print welcome message *)
-    LTerm.fprintl term "Forth Shell v0.2 (lambda-term)" >>= fun () ->
+    LTerm.fprintlf term "%s (lambda-term)" Config.version_string >>= fun () ->
     LTerm.fprintl term "Type 'exit' to quit, Ctrl-D for EOF" >>= fun () ->
     LTerm.fprintl term "" >>= fun () ->
 
     (* REPL loop *)
     let rec loop () =
-      (* Update custom prompt before each input *)
-      update_custom_prompt state >>= fun () ->
-      read_input term state >>= function
-      | None ->
-          (* EOF or exit *)
-          Lwt_io.printf "\nGoodbye!\n" >>= fun () ->
-          return ()
-      | Some line ->
-          if String.(strip line = "exit") || String.(strip line = "quit") then
-            Lwt_io.printf "Goodbye!\n" >>= fun () ->
-            return ()
-          else (
+      Lwt.catch
+        (fun () ->
+          (* Update custom prompt before each input *)
+          update_custom_prompt state >>= fun () ->
+          read_input term state >>= function
+          | None ->
+              (* EOF or exit *)
+              Lwt_io.printf "\nGoodbye!\n" >>= fun () ->
+              return ()
+          | Some line ->
+              if String.(strip line = "exit") || String.(strip line = "quit") then
+                Lwt_io.printf "Goodbye!\n" >>= fun () ->
+                return ()
+              else (
 
-            (* Evaluate the line *)
-            Lwt.catch
-              (fun () ->
-                (* Eval is now Lwt-based *)
-                Eval.eval_line state line >>= fun () ->
-                (* Auto-type output if present *)
-                auto_type_output state >>= fun () ->
-                (* Flush all output after evaluation *)
-                Lwt_io.flush Lwt_io.stdout >>= fun () ->
-                Lwt_io.flush Lwt_io.stderr >>= fun () ->
-                (* Ensure we're on a new line before the next prompt *)
-                Lwt_io.write Lwt_io.stdout "\n" >>= fun () ->
-                Lwt_io.flush Lwt_io.stdout >>= fun () ->
-                LTerm.flush term)
-              (fun exn ->
-                Lwt_io.printf "Error: %s\n" (Exn.to_string exn) >>= fun () ->
-                Lwt_io.flush Lwt_io.stdout >>= fun () ->
-                LTerm.flush term) >>= fun () ->
-            loop ())
+                (* Evaluate the line *)
+                Lwt.catch
+                  (fun () ->
+                    (* Eval is now Lwt-based *)
+                    Eval.eval_line state line >>= fun () ->
+                    (* Auto-type output if present *)
+                    auto_type_output state >>= fun () ->
+                    (* Flush all output after evaluation *)
+                    Lwt_io.flush Lwt_io.stdout >>= fun () ->
+                    Lwt_io.flush Lwt_io.stderr >>= fun () ->
+                    (* Ensure we're on a new line before the next prompt *)
+                    Lwt_io.write Lwt_io.stdout "\n" >>= fun () ->
+                    Lwt_io.flush Lwt_io.stdout >>= fun () ->
+                    LTerm.flush term)
+                  (function
+                    | Stdlib.Sys.Break ->
+                        (* Ctrl-C pressed during evaluation *)
+                        Lwt_io.printf "^C\n" >>= fun () ->
+                        Lwt_io.flush Lwt_io.stdout >>= fun () ->
+                        LTerm.flush term
+                    | Types.Word_exit ->
+                        (* Exit called outside word definition - treat as no-op *)
+                        LTerm.flush term
+                    | exn ->
+                        Lwt_io.printf "Error: %s\n" (Exn.to_string exn) >>= fun () ->
+                        Lwt_io.flush Lwt_io.stdout >>= fun () ->
+                        LTerm.flush term) >>= fun () ->
+                loop ()))
+        (function
+          | Stdlib.Sys.Break ->
+              (* Ctrl-C at top level - should be caught by read_input, but just in case *)
+              LTerm.fprintl term "^C" >>= fun () ->
+              loop ()
+          | exn -> Lwt.fail exn)
     in
     loop ()
   )

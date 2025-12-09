@@ -1,3 +1,5 @@
+(include_subdirs unqualified)
+
 (library
  (name fsh)
  (libraries core core_unix str lambda-term lwt lwt_react zed)
