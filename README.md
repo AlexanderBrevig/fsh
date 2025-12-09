@@ -2,6 +2,8 @@
 
 A stack-based shell that brings the power of concatenative programming to Unix command-line tools.
 
+[![asciicast](https://asciinema.org/a/z3WG3kSNKrGz0vrL6mu9v5xWZ.svg)](https://asciinema.org/a/z3WG3kSNKrGz0vrL6mu9v5xWZ)
+
 ## The Big Idea
 
 Traditional shell uses pipes:
