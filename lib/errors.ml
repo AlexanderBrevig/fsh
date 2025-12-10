@@ -54,6 +54,12 @@ let system_error ~op ~msg =
 let file_error ~op ~filename ~msg =
   failwith (sprintf "%s: %s: %s" op filename msg)
 
+(* Wrap a Unix operation and convert Unix_error to a readable error message *)
+let with_unix_error ~op f =
+  try f () with
+  | Core_unix.Unix_error (err, _, _) ->
+      failwith (sprintf "%s: %s" op (Core_unix.Error.message err))
+
 (* ========== General Errors ========== *)
 
 let invalid_argument ~op ~msg =

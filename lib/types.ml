@@ -13,26 +13,27 @@ type value =
 (* Stack is just a list of values *)
 type stack = value list [@@deriving sexp]
 
+(* Control flow target for skipping *)
+type skip_target = [ `Else | `Then ]
+
 (* Control flow state for if/then/else *)
 type control_flow_state =
   | Normal
-  | SkippingToElse of int  (* Skip until else/then, track nesting depth *)
-  | SkippingToThen of int  (* Skip until then, track nesting depth *)
+  | Skipping of { target : skip_target; depth : int }  (* Skip until target, track nesting depth *)
 
-(* Loop state for begin...until, begin...while...repeat, and do...loop *)
-type loop_info =
-  { start_tokens : string list  (* Tokens from begin/do to end of loop *)
-  ; loop_type : loop_type
-  ; do_start : int option      (* For do loops: start index *)
-  ; do_limit : int option      (* For do loops: limit index *)
-  ; do_index : int option      (* For do loops: current index *)
-  }
-
-and loop_type =
+(* Loop type for identifying loop variants during collection *)
+type loop_type =
   | BeginUntil    (* begin ... until *)
   | BeginWhile    (* begin ... while ... repeat *)
   | DoLoop        (* do ... loop *)
   | DoPlusLoop    (* do ... +loop *)
+
+(* Loop state for tracking active loops - uses variant for type safety *)
+type loop_info =
+  | BeginUntilLoop of { body : string list }
+  | BeginWhileLoop of { body : string list }
+  | DoCountedLoop of { body : string list; start : int; limit : int; current : int }
+  | DoPlusCountedLoop of { body : string list; start : int; limit : int; current : int }
 
 (* Word types and state are mutually recursive *)
 type word =

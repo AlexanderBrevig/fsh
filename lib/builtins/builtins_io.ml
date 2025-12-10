@@ -4,38 +4,29 @@ open Types
 
 (* ========== Printing ========== *)
 
-(* Print top of stack *)
-let dot = function
-  | [] -> Errors.stack_underflow "."
+(* Helper: print a value with optional newline *)
+let print_value ~newline ~op = function
+  | [] -> Errors.stack_underflow op
   | String s :: rest ->
-    Lwt_io.printl s >>= fun () ->
-    Lwt_io.flush Lwt_io.stdout >>= fun () ->
-    return rest
+      (if newline then Lwt_io.printl s else Lwt_io.printf "%s" s) >>= fun () ->
+      Lwt_io.flush Lwt_io.stdout >>= fun () ->
+      return rest
   | Output s :: rest ->
-    Lwt_io.printl s >>= fun () ->
-    Lwt_io.flush Lwt_io.stdout >>= fun () ->
-    return rest
+      (if newline then Lwt_io.printl s else Lwt_io.printf "%s" s) >>= fun () ->
+      Lwt_io.flush Lwt_io.stdout >>= fun () ->
+      return rest
   | Int i :: rest ->
-    Lwt_io.printlf "%d" i >>= fun () ->
-    Lwt_io.flush Lwt_io.stdout >>= fun () ->
-    return rest
+      (if newline then Lwt_io.printlf "%d" i else Lwt_io.printf "%d" i) >>= fun () ->
+      Lwt_io.flush Lwt_io.stdout >>= fun () ->
+      return rest
 ;;
 
-(* Type without newline *)
-let type_word = function
-  | [] -> Errors.stack_underflow "type"
-  | String s :: rest ->
-    Lwt_io.printf "%s" s >>= fun () ->
-    Lwt_io.flush Lwt_io.stdout >>= fun () ->
-    return rest
-  | Output s :: rest ->
-    Lwt_io.printf "%s" s >>= fun () ->
-    Lwt_io.flush Lwt_io.stdout >>= fun () ->
-    return rest
-  | Int i :: rest ->
-    Lwt_io.printf "%d" i >>= fun () ->
-    Lwt_io.flush Lwt_io.stdout >>= fun () ->
-    return rest
+(* Print top of stack with newline *)
+let dot stack = print_value ~newline:true ~op:"." stack
+;;
+
+(* Print top of stack without newline *)
+let type_word stack = print_value ~newline:false ~op:"type" stack
 ;;
 
 (* Stack display *)
@@ -78,44 +69,34 @@ let to_arg = function
 
 (* ========== File Redirection ========== *)
 
-(* Write Output to file: Output String -> *)
-let write_file state =
+(* Helper: write output to file with specified flags *)
+let write_to_file ~op ~flags state =
   match state.Types.stack with
-  | [] | [_] -> Errors.stack_underflow ">file"
+  | [] | [_] -> Errors.stack_underflow op
   | String filename :: Output content :: rest ->
       Lwt.catch
         (fun () ->
-          Lwt_io.with_file ~mode:Lwt_io.output ~flags:[Core_unix.O_WRONLY; Core_unix.O_CREAT; Core_unix.O_TRUNC] filename (fun oc ->
+          Lwt_io.with_file ~mode:Lwt_io.output ~flags filename (fun oc ->
             Lwt_io.write oc content) >>= fun () ->
           state.last_exit_code <- 0;
           state.stack <- rest;
           return ())
         (fun exn ->
           state.last_exit_code <- 1;
-          failwith (sprintf ">file: %s" (Exn.to_string exn)))
-  | String _ :: String _ :: _ -> Errors.requires_type ~op:">file" ~typ:"output (not string)"
-  | String _ :: Int _ :: _ -> Errors.requires_type ~op:">file" ~typ:"output (not int)"
-  | _ -> Errors.requires_type ~op:">file" ~typ:"filename and output"
+          failwith (sprintf "%s: %s" op (Exn.to_string exn)))
+  | String _ :: String _ :: _ -> Errors.requires_type ~op ~typ:"output (not string)"
+  | String _ :: Int _ :: _ -> Errors.requires_type ~op ~typ:"output (not int)"
+  | _ -> Errors.requires_type ~op ~typ:"filename and output"
+;;
+
+(* Write Output to file: Output String -> *)
+let write_file state =
+  write_to_file ~op:">file" ~flags:[Core_unix.O_WRONLY; Core_unix.O_CREAT; Core_unix.O_TRUNC] state
 ;;
 
 (* Append Output to file: Output String -> *)
 let append_file state =
-  match state.Types.stack with
-  | [] | [_] -> Errors.stack_underflow ">>file"
-  | String filename :: Output content :: rest ->
-      Lwt.catch
-        (fun () ->
-          Lwt_io.with_file ~mode:Lwt_io.output ~flags:[Core_unix.O_WRONLY; Core_unix.O_CREAT; Core_unix.O_APPEND] filename (fun oc ->
-            Lwt_io.write oc content) >>= fun () ->
-          state.last_exit_code <- 0;
-          state.stack <- rest;
-          return ())
-        (fun exn ->
-          state.last_exit_code <- 1;
-          failwith (sprintf ">>file: %s" (Exn.to_string exn)))
-  | String _ :: String _ :: _ -> Errors.requires_type ~op:">>file" ~typ:"output (not string)"
-  | String _ :: Int _ :: _ -> Errors.requires_type ~op:">>file" ~typ:"output (not int)"
-  | _ -> Errors.requires_type ~op:">>file" ~typ:"filename and output"
+  write_to_file ~op:">>file" ~flags:[Core_unix.O_WRONLY; Core_unix.O_CREAT; Core_unix.O_APPEND] state
 ;;
 
 (* ========== Registration ========== *)

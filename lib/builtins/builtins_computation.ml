@@ -2,27 +2,46 @@ open Core
 open Lwt
 open Types
 
+(* ========== Helper Functions ========== *)
+
+(* Pop and validate two integers from the stack *)
+let pop_two_ints ~op = function
+  | [] | [_] -> Errors.stack_underflow op
+  | Int b :: Int a :: rest -> (a, b, rest)
+  | _ -> Errors.requires_type ~op ~typ:"two integers"
+;;
+
+(* Pop and validate three integers from the stack *)
+let pop_three_ints ~op = function
+  | [] | [_] | [_; _] -> Errors.stack_underflow op
+  | Int c :: Int b :: Int a :: rest -> (a, b, c, rest)
+  | _ -> Errors.requires_type ~op ~typ:"three integers"
+;;
+
+(* Create a binary integer operation *)
+let binary_int_op ~op f stack =
+  let a, b, rest = pop_two_ints ~op stack in
+  return (Int (f a b) :: rest)
+;;
+
+(* Create a comparison operation that returns 0 or 1 *)
+let comparison_int_op ~op f stack =
+  let a, b, rest = pop_two_ints ~op stack in
+  return (Int (if f a b then 1 else 0) :: rest)
+;;
+
 (* ========== Arithmetic Operators ========== *)
 
 (* Addition: a b -> a+b *)
-let add = function
-  | [] | [_] -> Errors.stack_underflow "+"
-  | Int b :: Int a :: rest -> return (Int (a + b) :: rest)
-  | _ -> Errors.requires_type ~op:"+" ~typ:"two integers"
+let add stack = binary_int_op ~op:"+" ( + ) stack
 ;;
 
 (* Subtraction: a b -> a-b *)
-let sub = function
-  | [] | [_] -> Errors.stack_underflow "-"
-  | Int b :: Int a :: rest -> return (Int (a - b) :: rest)
-  | _ -> Errors.requires_type ~op:"-" ~typ:"two integers"
+let sub stack = binary_int_op ~op:"-" ( - ) stack
 ;;
 
 (* Multiplication: a b -> a*b *)
-let mul = function
-  | [] | [_] -> Errors.stack_underflow "*"
-  | Int b :: Int a :: rest -> return (Int (a * b) :: rest)
-  | _ -> Errors.requires_type ~op:"*" ~typ:"two integers"
+let mul stack = binary_int_op ~op:"*" ( * ) stack
 ;;
 
 (* Division: a b -> a/b *)
@@ -72,31 +91,19 @@ let eq = function
 ;;
 
 (* Greater than: a b -> 0 or 1 *)
-let gt = function
-  | [] | [_] -> Errors.stack_underflow ">"
-  | Int b :: Int a :: rest -> return (Int (if a > b then 1 else 0) :: rest)
-  | _ -> Errors.requires_type ~op:">" ~typ:"two integers"
+let gt stack = comparison_int_op ~op:">" ( > ) stack
 ;;
 
 (* Less than: a b -> 0 or 1 *)
-let lt = function
-  | [] | [_] -> Errors.stack_underflow "<"
-  | Int b :: Int a :: rest -> return (Int (if a < b then 1 else 0) :: rest)
-  | _ -> Errors.requires_type ~op:"<" ~typ:"two integers"
+let lt stack = comparison_int_op ~op:"<" ( < ) stack
 ;;
 
 (* Greater than or equal: a b -> 0 or 1 *)
-let gte = function
-  | [] | [_] -> Errors.stack_underflow ">="
-  | Int b :: Int a :: rest -> return (Int (if a >= b then 1 else 0) :: rest)
-  | _ -> Errors.requires_type ~op:">=" ~typ:"two integers"
+let gte stack = comparison_int_op ~op:">=" ( >= ) stack
 ;;
 
 (* Less than or equal: a b -> 0 or 1 *)
-let lte = function
-  | [] | [_] -> Errors.stack_underflow "<="
-  | Int b :: Int a :: rest -> return (Int (if a <= b then 1 else 0) :: rest)
-  | _ -> Errors.requires_type ~op:"<=" ~typ:"two integers"
+let lte stack = comparison_int_op ~op:"<=" ( <= ) stack
 ;;
 
 (* Not equal: a b -> 0 or 1 *)
@@ -203,21 +210,26 @@ let wrap_if_nonempty = function
 let loop_i state =
   match state.Types.loop_stack with
   | [] -> failwith "i: not inside a loop"
-  | loop_info :: _ ->
-      (match loop_info.do_index with
-       | Some idx -> state.stack <- Int idx :: state.stack; return ()
-       | None -> failwith "i: loop index not available")
+  | Types.DoCountedLoop { current; _ } :: _
+  | Types.DoPlusCountedLoop { current; _ } :: _ ->
+      state.stack <- Int current :: state.stack;
+      return ()
+  | Types.BeginUntilLoop _ :: _
+  | Types.BeginWhileLoop _ :: _ ->
+      failwith "i: loop index not available (not a counted loop)"
 ;;
 
 (* Get outer loop index (for nested loops): -> j *)
 let loop_j state =
   match state.Types.loop_stack with
-  | [] -> failwith "j: not inside a nested loop"
-  | [ _ ] -> failwith "j: not inside a nested loop"
-  | _ :: outer_loop :: _ ->
-      (match outer_loop.do_index with
-       | Some idx -> state.stack <- Int idx :: state.stack; return ()
-       | None -> failwith "j: loop index not available")
+  | [] | [ _ ] -> failwith "j: not inside a nested loop"
+  | _ :: Types.DoCountedLoop { current; _ } :: _
+  | _ :: Types.DoPlusCountedLoop { current; _ } :: _ ->
+      state.stack <- Int current :: state.stack;
+      return ()
+  | _ :: Types.BeginUntilLoop _ :: _
+  | _ :: Types.BeginWhileLoop _ :: _ ->
+      failwith "j: outer loop index not available (not a counted loop)"
 ;;
 
 (* ========== Registration ========== *)

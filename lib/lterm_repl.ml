@@ -99,15 +99,6 @@ let create_continuation_prompt _state =
 let history_file = Config.Paths.history ()
 ;;
 
-(* Check if a string is an integer *)
-let is_int s =
-  try
-    let _ = Int.of_string s in
-    true
-  with
-  | _ -> false
-;;
-
 (* Control flow keywords (imported from Keywords module) *)
 let control_flow_keywords = Keywords.control_flow
 ;;
@@ -115,41 +106,8 @@ let control_flow_keywords = Keywords.control_flow
 (* Tokenize a string for syntax highlighting with position tracking *)
 let tokenize_for_highlighting text =
   let s = Zed_string.to_utf8 text in
-  let rec tokenize_helper pos in_quote current_token token_start acc =
-    if pos >= String.length s then
-      (* End of string *)
-      let final_acc =
-        if String.is_empty current_token then acc
-        else (current_token, in_quote, token_start) :: acc
-      in
-      List.rev final_acc
-    else
-      let c = s.[pos] in
-      match c with
-      | '"' when not in_quote ->
-          (* Start quote *)
-          let new_acc =
-            if String.is_empty current_token then acc
-            else (current_token, false, token_start) :: acc
-          in
-          tokenize_helper (pos + 1) true "\"" pos new_acc
-      | '"' when in_quote ->
-          (* End quote *)
-          let quoted_token = current_token ^ "\"" in
-          tokenize_helper (pos + 1) false "" pos ((quoted_token, true, token_start) :: acc)
-      | (' ' | '\t') when not in_quote ->
-          (* Whitespace outside quotes *)
-          let new_acc =
-            if String.is_empty current_token then acc
-            else (current_token, false, token_start) :: acc
-          in
-          tokenize_helper (pos + 1) false "" pos new_acc
-      | _ ->
-          (* Regular character *)
-          let new_token_start = if String.is_empty current_token then pos else token_start in
-          tokenize_helper (pos + 1) in_quote (current_token ^ String.make 1 c) new_token_start acc
-  in
-  tokenize_helper 0 false "" 0 []
+  let tokens = Tokenizer.tokenize_with_positions ~include_quotes:true s in
+  List.map tokens ~f:(fun t -> (t.text, t.quoted, t.position))
 ;;
 
 (* Get style for a token based on its type *)
@@ -160,7 +118,7 @@ let get_token_style state (token, is_quoted) =
   else if List.mem control_flow_keywords token ~equal:String.equal then
     (* Control flow keywords are magenta *)
     LTerm_style.({ none with foreground = Some lmagenta })
-  else if is_int token then
+  else if Tokenizer.is_int token then
     (* Numbers are cyan *)
     LTerm_style.({ none with foreground = Some lcyan })
   else if Hashtbl.mem state.Types.dict token then

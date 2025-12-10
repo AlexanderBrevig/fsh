@@ -110,32 +110,28 @@ let unsetenv_word = function
   | _ -> Errors.requires_type ~op:"unsetenv" ~typ:"string"
 ;;
 
-(* Append to colon-separated environment variable: value key -> *)
-let env_append = function
-  | [] | [_] -> Errors.stack_underflow "env-append"
+(* Helper: modify colon-separated environment variable with custom combiner *)
+let modify_env_var ~op ~combiner = function
+  | [] | [_] -> Errors.stack_underflow op
   | String key :: String value :: rest ->
       let new_value =
         match Sys.getenv key with
-        | Some existing -> existing ^ ":" ^ value
+        | Some existing -> combiner existing value
         | None -> value
       in
       Core_unix.putenv ~key ~data:new_value;
       return rest
-  | _ -> Errors.requires_type ~op:"env-append" ~typ:"two strings (value key)"
+  | _ -> Errors.requires_type ~op ~typ:"two strings (value key)"
+;;
+
+(* Append to colon-separated environment variable: value key -> *)
+let env_append stack =
+  modify_env_var ~op:"env-append" ~combiner:(fun existing value -> existing ^ ":" ^ value) stack
 ;;
 
 (* Prepend to colon-separated environment variable: value key -> *)
-let env_prepend = function
-  | [] | [_] -> Errors.stack_underflow "env-prepend"
-  | String key :: String value :: rest ->
-      let new_value =
-        match Sys.getenv key with
-        | Some existing -> value ^ ":" ^ existing
-        | None -> value
-      in
-      Core_unix.putenv ~key ~data:new_value;
-      return rest
-  | _ -> Errors.requires_type ~op:"env-prepend" ~typ:"two strings (value key)"
+let env_prepend stack =
+  modify_env_var ~op:"env-prepend" ~combiner:(fun existing value -> value ^ ":" ^ existing) stack
 ;;
 
 (* Push all environment variables onto stack *)
@@ -163,13 +159,10 @@ let cd_word state =
   | [] -> Errors.stack_underflow "cd"
   | String path :: rest ->
       let expanded_path = expand_tilde path in
-      (try
+      Errors.with_unix_error ~op:"cd" (fun () ->
         Core_unix.chdir expanded_path;
         state.stack <- rest;
-        return ()
-       with
-       | Core_unix.Unix_error (err, _, _) ->
-           failwith (sprintf "cd: %s" (Core_unix.Error.message err)))
+        return ())
   | _ -> Errors.requires_type ~op:"cd" ~typ:"string"
 ;;
 
@@ -180,14 +173,11 @@ let pushd_word state =
   | String path :: rest ->
       let current = Core_unix.getcwd () in
       let expanded_path = expand_tilde path in
-      (try
+      Errors.with_unix_error ~op:"pushd" (fun () ->
         Core_unix.chdir expanded_path;
         state.dir_stack <- current :: state.dir_stack;
         state.stack <- rest;
-        return ()
-       with
-       | Core_unix.Unix_error (err, _, _) ->
-           failwith (sprintf "pushd: %s" (Core_unix.Error.message err)))
+        return ())
   | _ -> Errors.requires_type ~op:"pushd" ~typ:"string"
 ;;
 
@@ -196,13 +186,10 @@ let popd_word state =
   match state.Types.dir_stack with
   | [] -> failwith "popd: directory stack empty"
   | dir :: rest ->
-      (try
+      Errors.with_unix_error ~op:"popd" (fun () ->
         Core_unix.chdir dir;
         state.dir_stack <- rest;
-        return ()
-       with
-       | Core_unix.Unix_error (err, _, _) ->
-           failwith (sprintf "popd: %s" (Core_unix.Error.message err)))
+        return ())
 ;;
 
 (* Exit from current word definition *)
